@@ -2,7 +2,7 @@ import streamlit as st
 from groq import Groq
 import PyPDF2
 
-# 1. Page Configuration & Theme
+# 1. Page Config
 st.set_page_config(page_title="Amal's Medical Brain", layout="wide")
 st.markdown("""
     <style>
@@ -15,66 +15,84 @@ st.markdown("""
 # 2. API Setup
 client = Groq(api_key=st.secrets["GROQ_API_KEY"])
 
-# 3. Memory & History
 if "medical_history" not in st.session_state:
     st.session_state.medical_history = []
-if "current_text" not in st.session_state:
-    st.session_state.current_text = ""
 
 st.title("🌸 Amal's Medical Brain 🌸")
 st.sidebar.title("📚 Archived Lectures")
 for doc in st.session_state.medical_history:
     st.sidebar.write(f"📍 {doc['name']}")
 
-# 4. File Uploader
-uploaded_file = st.file_uploader("Upload Lecture (PDF, Word, PPT)", type=["pdf", "docx", "pptx"])
+# 3. File Uploader
+uploaded_file = st.file_uploader("Upload Lecture", type=["pdf", "docx", "pptx"])
 
 if uploaded_file:
-    if st.session_state.current_text == "":
-        if uploaded_file.type == "application/pdf":
-            reader = PyPDF2.PdfReader(uploaded_file)
-            st.session_state.current_text = "".join([p.extract_text() for p in reader.pages[:5]])
-        
-        if {"name": uploaded_file.name} not in st.session_state.medical_history:
-            st.session_state.medical_history.append({"name": uploaded_file.name})
-    
-    st.success(f"✅ Active File: {uploaded_file.name}")
+    # استخراج النص بحذر شديد
+    raw_text = ""
+    try:
+        reader = PyPDF2.PdfReader(uploaded_file)
+        # رح ناخد أول 3 صفحات فقط لأنها الأهم ولضمان عدم تجاوز الحجم
+        for page in reader.pages[:3]:
+            content = page.extract_text()
+            if content:
+                raw_text += content
+    except:
+        raw_text = "Error reading PDF"
 
-    # 5. Control Buttons
+    # تنظيف النص وتحديده بـ 2500 حرف فقط لضمان استقرار الخدمة
+    final_text = raw_text[:2500] if raw_text else "No text found"
+
+    if {"name": uploaded_file.name} not in st.session_state.medical_history:
+        st.session_state.medical_history.append({"name": uploaded_file.name})
+    
+    st.success(f"✅ Active: {uploaded_file.name}")
+
+    # 4. Control Buttons
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        if st.button("📝 Summarize & USMLE"):
-            with st.spinner('Analyzing...'):
-                prompt = f"Summarize in Arabic, link to USMLE and PubMed: {st.session_state.current_text[:4000]}"
-                resp = client.chat.completions.create(messages=[{"role":"user","content":prompt}], model="llama3-8b-8192")
-                st.markdown(resp.choices[0].message.content)
+        if st.button("📝 Summarize"):
+            with st.spinner('Summarizing...'):
+                try:
+                    resp = client.chat.completions.create(
+                        messages=[{"role":"user","content":f"Summarize this medical text in Arabic: {final_text}"}],
+                        model="llama3-8b-8192"
+                    )
+                    st.markdown(resp.choices[0].message.content)
+                except:
+                    st.error("Text still too large. Try a shorter PDF.")
 
     with col2:
-        if st.button("❓ Full Q&A Mode"):
-            with st.spinner('Generating Questions...'):
-                prompt = f"Convert this text into a comprehensive Q&A in Arabic: {st.session_state.current_text[:4000]}"
-                resp = client.chat.completions.create(messages=[{"role":"user","content":prompt}], model="llama3-8b-8192")
-                st.info(resp.choices[0].message.content)
+        if st.button("❓ Q&A Mode"):
+            with st.spinner('Generating...'):
+                try:
+                    resp = client.chat.completions.create(
+                        messages=[{"role":"user","content":f"Convert to Arabic Q&A: {final_text}"}],
+                        model="llama3-8b-8192"
+                    )
+                    st.info(resp.choices[0].message.content)
+                except:
+                    st.error("Error generating Q&A.")
 
     with col3:
         if st.button("🧠 Flashcards"):
-            with st.spinner('Creating Cards...'):
-                prompt = f"Create 5 medical flashcards in Arabic from: {st.session_state.current_text[:3000]}"
-                resp = client.chat.completions.create(messages=[{"role":"user","content":prompt}], model="llama3-8b-8192")
-                st.warning(resp.choices[0].message.content)
+            with st.spinner('Creating...'):
+                try:
+                    resp = client.chat.completions.create(
+                        messages=[{"role":"user","content":f"Create 3 flashcards in Arabic: {final_text}"}],
+                        model="llama3-8b-8192"
+                    )
+                    st.warning(resp.choices[0].message.content)
 
-    # 6. Chat Interface (اسألي أي سؤال عن المادة)
+    # 5. Chat Interface
     st.divider()
-    user_question = st.text_input("💬 اسألي أي سؤال إضافي عن هذه المحاضرة:")
-    if user_question:
-        with st.spinner('Thinking...'):
-            chat_prompt = f"Based on this text: {st.session_state.current_text[:4000]}, answer Amal's question in Arabic: {user_question}"
-            resp = client.chat.completions.create(messages=[{"role":"user","content":chat_prompt}], model="llama3-8b-8192")
+    user_q = st.text_input("💬 اسألي أي سؤال عن المحاضرة:")
+    if user_q:
+        try:
+            resp = client.chat.completions.create(
+                messages=[{"role":"user","content":f"Text: {final_text}\nQuestion: {user_q}"}],
+                model="llama3-8b-8192"
+            )
             st.chat_message("assistant").write(resp.choices[0].message.content)
-
-# 7. Daily Review
-if st.session_state.medical_history:
-    st.divider()
-    st.subheader("💡 Quick Daily Review")
-    st.caption("AI: Don't forget to review the key clinical correlations from your history!")
+        except:
+            st.error("Could not process question.")
