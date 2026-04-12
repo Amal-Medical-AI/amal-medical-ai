@@ -4,23 +4,24 @@ import PyPDF2
 import re
 import urllib.parse
 
-# 1. إعدادات التصميم (CSS)
+# 1. إعدادات الستايل الطبي
 st.set_page_config(page_title="Amal's Medical Brain", layout="wide")
 st.markdown("""
     <style>
     .main { background-color: #fff0f5; }
-    .stButton>button { width: 100%; border-radius: 20px; background-color: #ff69b4; color: white; font-weight: bold; margin-bottom: 10px; }
-    .flashcard { background-color: white; border: 2px solid #ff69b4; padding: 20px; border-radius: 15px; text-align: center; margin: 10px 0; box-shadow: 3px 3px 10px rgba(0,0,0,0.1); }
-    .quiz-box { background-color: #fce4ec; padding: 20px; border-radius: 15px; border-left: 5px solid #ff69b4; margin-bottom: 20px; }
-    h1, h2, h3 { color: #ff69b4; text-align: center; }
+    .stButton>button { width: 100%; border-radius: 20px; background-color: #ff69b4; color: white; font-weight: bold; margin-bottom: 15px; height: 3.5em; border: none; }
+    .stButton>button:hover { background-color: #e91e63; transform: scale(1.02); transition: 0.3s; }
+    .result-box { background-color: white; padding: 20px; border-radius: 15px; border: 2px solid #ff69b4; color: #333; margin-bottom: 20px; }
+    .flashcard { background-color: #fff9fb; border: 2px dashed #ff69b4; padding: 15px; border-radius: 10px; margin: 10px 0; text-align: center; }
+    h1, h3 { color: #ff69b4; text-align: center; }
     </style>
     """, unsafe_allow_html=True)
 
-# 2. إعدادات الـ API والذاكرة
+# 2. إعداد الـ API والذاكرة
 client = Groq(api_key=st.secrets["GROQ_API_KEY"])
 
-if "quiz_data" not in st.session_state: st.session_state.quiz_data = None
-if "flashcards_data" not in st.session_state: st.session_state.flashcards_data = None
+if "last_result" not in st.session_state: st.session_state.last_result = ""
+if "current_text" not in st.session_state: st.session_state.current_text = ""
 
 st.title("🌸 Amal's Medical Brain 🌸")
 
@@ -28,79 +29,75 @@ st.title("🌸 Amal's Medical Brain 🌸")
 uploaded_file = st.file_uploader("Upload Medical Lecture (PDF)", type=["pdf"])
 
 if uploaded_file:
-    # استخراج النص (أول 5 صفحات)
-    reader = PyPDF2.PdfReader(uploaded_file)
-    raw_text = " ".join([p.extract_text() for p in reader.pages[:5]])
-    clean_text = re.sub(r'\s+', ' ', raw_text)[:4000]
-    topic_name = uploaded_file.name.replace(".pdf", "")
-
-    # دالة AI
-    def ask_ai(prompt):
-        resp = client.chat.completions.create(
-            messages=[{"role": "user", "content": prompt}],
-            model="llama-3.3-70b-versatile"
-        )
-        return resp.choices[0].message.content
-
-    # --- منطقة الكبسات (مرتبة ورا بعض) ---
-    st.subheader("🛠️ Study Tools")
+    if not st.session_state.current_text:
+        reader = PyPDF2.PdfReader(uploaded_file)
+        raw = " ".join([p.extract_text() for p in reader.pages[:6]])
+        st.session_state.current_text = re.sub(r'\s+', ' ', raw).strip()[:5000]
     
-    # 1. زر اليوتيوب (تم الإصلاح)
-    search_query = f"{topic_name} medical lecture high yield"
-    yt_url = f"https://youtube.com{urllib.parse.quote(search_query)}"
-    st.link_button("🎬 Watch Suggested YouTube Videos", yt_url)
+    topic = uploaded_file.name.replace(".pdf", "")
 
-    # 2. زر الكويز
-    if st.button("📝 Generate Interactive Quiz"):
-        with st.spinner('Preparing Quiz...'):
-            prompt = f"Create 3 USMLE questions from this text: {clean_text}. Format: Question, Options A,B,C,D, and Correct Answer."
-            st.session_state.quiz_data = ask_ai(prompt)
+    def ask_ai(prompt):
+        try:
+            resp = client.chat.completions.create(
+                messages=[{"role": "user", "content": prompt}],
+                model="llama-3.3-70b-versatile"
+            )
+            return resp.choices[0].message.content
+        except: return "⚠️ Error connecting to AI. Try again."
 
-    # 3. زر الفلاش كاردز
-    if st.button("🧠 Create Visual Flashcards"):
-        with st.spinner('Creating Cards...'):
-            prompt = f"Create 4 medical flashcards (Front: Question, Back: Answer) from: {clean_text}"
-            st.session_state.flashcards_data = ask_ai(prompt)
+    # --- منطقة الأزرار (كلها ورا بعض تحت بعض) ---
+    st.subheader("🚀 Study Command Center")
 
-    # 4. أزرار إضافية
-    col_a, col_b = st.columns(2)
-    with col_a:
-        if st.button("🩺 USMLE High-Yield"):
-            st.write(ask_ai(f"List USMLE high yield points for: {clean_text}"))
-    with col_b:
-        if st.button("🔬 Recent Research 2024"):
-            st.write(ask_ai(f"Recent research 2024 about: {topic_name}"))
+    # 1. زر التلخيص (Summarize)
+    if st.button("📝 Summarize This Lecture"):
+        with st.spinner('Summarizing...'):
+            st.session_state.last_result = ask_ai(f"Provide a structured medical summary for: {st.session_state.current_text}")
 
-    # --- عرض النتائج التفاعلية ---
+    # 2. زر اليو اس ام لي (USMLE)
+    if st.button("🩺 USMLE High-Yield Points"):
+        with st.spinner('Extracting high-yield info...'):
+            st.session_state.last_result = ask_ai(f"List the high-yield USMLE Step 1 & 2 facts about: {st.session_state.current_text}")
 
-    # عرض الكويز
-    if st.session_state.quiz_data:
-        st.divider()
-        st.subheader("✍️ Practice Quiz")
-        questions = st.session_state.quiz_data.split("Question")
-        for q in questions[1:]:
-            with st.container():
-                st.markdown(f'<div class="quiz-box"><b>Question:</b> {q.split("Answer:")[0]}</div>', unsafe_allow_html=True)
-                # إضافة أزرار اختيار حقيقية
-                user_choice = st.radio("Choose your answer:", ["A", "B", "C", "D"], key=q[:20])
-                if st.button(f"Check Answer", key="btn"+q[:20]):
-                    correct = q.split("Answer:")[1][:5]
-                    if user_choice in correct:
-                        st.success("✅ Correct! Brilliant.")
-                    else:
-                        st.error(f"❌ Incorrect. The right answer is {correct}")
+    # 3. زر الكويز (Interactive Quiz)
+    if st.button("✍️ Start Interactive Quiz"):
+        with st.spinner('Creating quiz...'):
+            st.session_state.last_result = ask_ai(f"Create 3 USMLE multiple choice questions with answers from: {st.session_state.current_text}")
 
-    # عرض الفلاش كاردز بشكل بطاقات
-    if st.session_state.flashcards_data:
-        st.divider()
-        st.subheader("🗂️ Study Flashcards")
-        cards = st.session_state.flashcards_data.split("\n\n")
-        for card in cards:
-            if ":" in card:
-                st.markdown(f'<div class="flashcard">{card}</div>', unsafe_allow_html=True)
+    # 4. زر الفلاش كاردز (Flashcards)
+    if st.button("🧠 Create Flashcards"):
+        with st.spinner('Generating cards...'):
+            cards_text = ask_ai(f"Create 5 flashcards (Front/Back) from: {st.session_state.current_text}")
+            st.session_state.last_result = cards_text
 
-# 6. الدردشة (أسفل الصفحة)
+    # 5. زر الأبحاث (Research)
+    if st.button("🔬 Recent Research & Breakthroughs (2024+)"):
+        with st.spinner('Searching latest research...'):
+            st.session_state.last_result = ask_ai(f"What are the latest (2024-2025) research developments or clinical trials regarding {topic}?")
+
+    # 6. أزرار الروابط (يوتيوب وصور)
+    yt_query = urllib.parse.quote(f"{topic} medical explanation")
+    st.link_button("🎬 Watch Suggested YouTube Video", f"https://youtube.com{yt_query}")
+    
+    img_query = urllib.parse.quote(f"{topic} medical diagram anatomy")
+    st.link_button("🖼️ View Medical Diagrams & Images", f"https://google.com{img_query}")
+
+    # 7. أزرار الترجمة (تظهر دائماً لترجمة آخر نتيجة)
+    st.divider()
+    col_ar, col_he = st.columns(2)
+    with col_ar:
+        if st.button("🌐 Translate Result to Arabic"):
+            st.session_state.last_result = ask_ai(f"Translate this to professional medical Arabic: {st.session_state.last_result}")
+    with col_he:
+        if st.button("🌐 Translate Result to Hebrew"):
+            st.session_state.last_result = ask_ai(f"Translate this to professional medical Hebrew: {st.session_state.last_result}")
+
+    # --- عرض النتائج ---
+    if st.session_state.last_result:
+        st.markdown("### 📋 Results Area")
+        st.markdown(f'<div class="result-box">{st.session_state.last_result}</div>', unsafe_allow_html=True)
+
+# 8. الدردشة في الأسفل
 st.divider()
-user_input = st.text_input("💬 Ask any specific question:")
-if user_input:
-    st.write(ask_ai(user_input))
+user_q = st.text_input("💬 Ask Amal's AI anything else:")
+if user_q:
+    st.write(ask_ai(f"Context: {st.session_state.current_text[:2000]}\nQuestion: {user_q}"))
