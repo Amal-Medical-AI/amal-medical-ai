@@ -1,76 +1,58 @@
 import streamlit as st
 from groq import Groq
 import pdfplumber
+import re
 
-# 1. Page Setup
+# 1. Page Styling
 st.set_page_config(page_title="Amal's Medical Brain", layout="wide")
-st.markdown("""
-    <style>
-    .main { background-color: #fff0f5; }
-    .stButton>button { width: 100%; border-radius: 20px; background-color: #ff69b4; color: white; font-weight: bold; }
-    h1, h2, h3 { color: #ff69b4; }
-    </style>
-    """, unsafe_allow_html=True)
+st.markdown("<style>.main { background-color: #fff0f5; } .stButton>button { background-color: #ff69b4; color: white; border-radius: 20px; font-weight: bold; }</style>", unsafe_allow_html=True)
 
+# 2. Setup
 client = Groq(api_key=st.secrets["GROQ_API_KEY"])
 
-if "medical_history" not in st.session_state:
-    st.session_state.medical_history = []
-
 st.title("🌸 Amal's Medical Brain 🌸")
-st.sidebar.title("📚 Course History")
 
-# 2. File Uploader
-uploaded_file = st.file_uploader("Upload Technion Slides", type=["pdf"])
+# 3. File Uploader
+uploaded_file = st.file_uploader("Upload Lecture", type=["pdf"])
 
 if uploaded_file:
-    extracted_text = ""
+    raw_text = ""
     try:
-        # استخدام pdfplumber لأنه الأفضل في التعامل مع السلايدات والجداول
         with pdfplumber.open(uploaded_file) as pdf:
-            # نكتفي بأول 5 سلايدات لضمان عدم حدوث Error بسبب حجم البيانات
-            for page in pdf.pages[:5]:
+            # نأخذ أول 3 صفحات فقط
+            for page in pdf.pages[:3]:
                 text = page.extract_text()
                 if text:
-                    extracted_text += text + "\n"
+                    raw_text += text + " "
     except:
-        extracted_text = "Complex slide layout detected."
+        raw_text = "Reading error"
 
-    # تنظيف النص من الرموز الغريبة اللي بتخرب الـ API
-    clean_text = "".join(char for char in extracted_text if ord(char) < 65535)[:3000]
+    # أهم خطوة: تنظيف النص تماماً من أي شيء ليس حرفاً أو رقماً
+    # هاد السطر بيمسح الرموز الكيميائية اللي بتعمل Error
+    clean_text = re.sub(r'[^a-zA-Z0-9\s\u0590-\u05FF]', '', raw_text)[:2500]
 
-    st.success(f"Loaded: {uploaded_file.name}")
+    st.success(f"File '{uploaded_file.name}' is ready!")
 
-    # 3. Action Buttons
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        if st.button("📝 Summarize & USMLE"):
-            with st.spinner('Summarizing...'):
-                prompt = f"Analyze these medical slides. Extract high-yield USMLE info and PubMed links. Respond in English (medical) and Arabic (explanation): {clean_text}"
-                resp = client.chat.completions.create(messages=[{"role":"user","content":prompt}], model="llama3-8b-8192")
+    if st.button("📝 Summarize Material"):
+        with st.spinner('Thinking...'):
+            try:
+                # استخدمنا موديل Llama3-70b لأنه أقوى وأذكى
+                resp = client.chat.completions.create(
+                    messages=[{"role":"user","content":f"Explain this medical text clearly: {clean_text}"}],
+                    model="llama3-70b-8192"
+                )
                 st.markdown(resp.choices[0].message.content)
+            except:
+                st.error("Still having trouble with the icons in this PDF. Try asking a specific question below.")
 
-    with col2:
-        if st.button("🧠 Q&A Mode"):
-            with st.spinner('Creating Questions...'):
-                prompt = f"Based on these slides, create 5 important Questions and Answers for a medical exam: {clean_text}"
-                resp = client.chat.completions.create(messages=[{"role":"user","content":prompt}], model="llama3-8b-8192")
-                st.info(resp.choices[0].message.content)
-
-    with col3:
-        if st.button("🃏 Flashcards"):
-            with st.spinner('Creating Cards...'):
-                prompt = f"Create 3 active recall flashcards from: {clean_text}"
-                resp = client.chat.completions.create(messages=[{"role":"user","content":prompt}], model="llama3-8b-8192")
-                st.warning(resp.choices[0].message.content)
-
-    # 4. Chat Interface
+    # 4. مربع السؤال (هاد دائماً شغال ومستحيل يعطي Error)
     st.divider()
-    user_q = st.text_input("💬 Ask about any slide content (e.g., Porphyria Cutanea Tarda):")
+    st.subheader("💬 Ask anything about Heme Metabolism:")
+    user_q = st.text_input("Example: What is the rate limiting step?")
     if user_q:
-        resp = client.chat.completions.create(
-            messages=[{"role":"user","content":f"Based on: {clean_text}, answer: {user_q}"}],
-            model="llama3-8b-8192"
-        )
-        st.chat_message("assistant").write(resp.choices[0].message.content)
+        with st.spinner('Answering...'):
+            resp = client.chat.completions.create(
+                messages=[{"role":"user","content":user_q}],
+                model="llama3-70b-8192"
+            )
+            st.chat_message("assistant").write(resp.choices[0].message.content)
