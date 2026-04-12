@@ -2,62 +2,50 @@ import streamlit as st
 from groq import Groq
 import PyPDF2
 
-# Page Config & Styling
+# إعدادات الصفحة والتصميم الزهري
 st.set_page_config(page_title="Amal's Medical Brain", layout="wide")
-st.markdown("""
-    <style>
-    .main { background-color: #fff0f5; }
-    .stButton>button { background-color: #ff69b4; color: white; border-radius: 20px; font-weight: bold; }
-    h1, h3 { color: #ff69b4; text-align: center; }
-    </style>
-    """, unsafe_allow_html=True)
+st.markdown("<style>.main { background-color: #fff0f5; } .stButton>button { background-color: #ff69b4; color: white; border-radius: 20px; }</style>", unsafe_allow_html=True)
 
 client = Groq(api_key=st.secrets["GROQ_API_KEY"])
 
-if "medical_history" not in st.session_state:
-    st.session_state.medical_history = []
-
 st.title("🌸 Amal's Medical Brain 🌸")
-st.sidebar.title("📚 Archived Lectures")
+st.subheader("تحويل المحاضرات إلى نظام سؤال وجواب")
 
-uploaded_file = st.file_uploader("Upload Medical File", type=["pdf", "docx", "pptx"])
+uploaded_file = st.file_uploader("ارفعي ملف المحاضرة هنا", type=["pdf", "docx"])
 
 if uploaded_file:
-    # قراءة النص بطريقة ذكية لا تسبب تعليق
     text_content = ""
     if uploaded_file.type == "application/pdf":
         reader = PyPDF2.PdfReader(uploaded_file)
-        # رح ناخد أول صفحات عشان نضمن السرعة
-        num_pages = min(len(reader.pages), 5) 
-        for i in range(num_pages):
-            text_content += reader.pages[i].extract_text()
+        # رح يقرأ المحتوى لغاية 5 صفحات لضمان السرعة
+        for page in reader.pages[:5]:
+            text_content += page.extract_text()
     
-    st.success(f"✅ Received: {uploaded_file.name}")
+    st.success(f"✅ تم استلام: {uploaded_file.name}")
 
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        if st.button("📝 Summarize (Smart Mode)"):
-            with st.spinner('Analyzing...'):
-                try:
-                    # نرسل فقط زبدة الموضوع
-                    snippet = text_content[:5000]
-                    response = client.chat.completions.create(
-                        messages=[{"role": "user", "content": f"Summarize this medical text in Arabic, focus on USMLE points and PubMed 2024-2026 links: {snippet}"}],
-                        model="llama3-8b-8192",
-                    )
-                    st.markdown(response.choices[0].message.content)
-                except:
-                    st.warning("آمال، الملف لسه كبير. جربي رفعه كـ PDF أصغر أو ملف Word.")
+    # الخيار الجديد اللي طلبتيه
+    if st.button("❓ تحويل المادة إلى (سؤال وجواب) تفصيلي"):
+        with st.spinner('جاري استخراج الأسئلة من صلب المحاضرة...'):
+            try:
+                # طلب محدد من الذكاء الاصطناعي لتحويل المادة لأسئلة وأجوبة
+                prompt = f"قم بتحويل المادة الطبية التالية إلى قائمة شاملة من الأسئلة والأجوبة (Q&A) باللغة العربية. ركز على النقاط السريرية (Clinical points) وما يهم آمال في USMLE: {text_content[:6000]}"
+                
+                response = client.chat.completions.create(
+                    messages=[{"role": "user", "content": prompt}],
+                    model="llama3-8b-8192",
+                )
+                
+                st.markdown("### 📝 بنك الأسئلة والأجوبة الخاص بمحاضرتك:")
+                st.write(response.choices[0].message.content)
+            except:
+                st.error("آمال، الملف دسم جداً. جربي رفعه كملف أصغر.")
 
-    with col2:
-        if st.button("🧠 Quick Flashcards"):
-            with st.spinner('Creating...'):
-                try:
-                    response = client.chat.completions.create(
-                        messages=[{"role": "user", "content": f"Create 3 USMLE style flashcards in Arabic from: {text_content[:3000]}"}],
-                        model="llama3-8b-8192",
-                    )
-                    st.info(response.choices[0].message.content)
-                except:
-                    st.error("Error creating flashcards.")
+    # زر إضافي للتلخيص السريع
+    if st.button("📋 ملخص سريع للموضوع"):
+        with st.spinner('جاري التلخيص...'):
+            prompt = f"لخص هذه المادة باختصار شديد لآمال: {text_content[:3000]}"
+            response = client.chat.completions.create(
+                messages=[{"role": "user", "content": prompt}],
+                model="llama3-8b-8192",
+            )
+            st.info(response.choices[0].message.content)
