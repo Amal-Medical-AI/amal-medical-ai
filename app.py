@@ -1,19 +1,17 @@
 import streamlit as st
 from groq import Groq
 import pdfplumber
-import re
 
-# 1. Page Styling
+# 1. Page Setup
 st.set_page_config(page_title="Amal's Medical Brain", layout="wide")
 st.markdown("""
     <style>
     .main { background-color: #fff0f5; }
-    .stButton>button { width: 100%; border-radius: 20px; background-color: #ff69b4; color: white; font-weight: bold; border: none; }
+    .stButton>button { width: 100%; border-radius: 20px; background-color: #ff69b4; color: white; font-weight: bold; }
     h1, h2, h3 { color: #ff69b4; }
     </style>
     """, unsafe_allow_html=True)
 
-# 2. Setup
 client = Groq(api_key=st.secrets["GROQ_API_KEY"])
 
 if "medical_history" not in st.session_state:
@@ -22,70 +20,57 @@ if "medical_history" not in st.session_state:
 st.title("🌸 Amal's Medical Brain 🌸")
 st.sidebar.title("📚 Course History")
 
-# 3. Enhanced File Uploader
-uploaded_file = st.file_uploader("Upload Medical Lecture", type=["pdf", "docx", "pptx"])
+# 2. File Uploader
+uploaded_file = st.file_uploader("Upload Technion Slides", type=["pdf"])
 
 if uploaded_file:
-    raw_text = ""
+    extracted_text = ""
     try:
+        # استخدام pdfplumber لأنه الأفضل في التعامل مع السلايدات والجداول
         with pdfplumber.open(uploaded_file) as pdf:
-            # نكتفي بأول صفحتين لضمان عدم حدوث Error بسبب الحجم أو الرموز
-            for page in pdf.pages[:2]:
-                raw_text += page.extract_text() or ""
+            # نكتفي بأول 5 سلايدات لضمان عدم حدوث Error بسبب حجم البيانات
+            for page in pdf.pages[:5]:
+                text = page.extract_text()
+                if text:
+                    extracted_text += text + "\n"
     except:
-        raw_text = "Processing error"
+        extracted_text = "Complex slide layout detected."
 
-    # أهم خطوة: تنظيف النص من أي رمز غريب (إبقاء الحروف والأرقام فقط)
-    clean_text = re.sub(r'[^\x00-\x7F]+', ' ', raw_text)[:2000]
+    # تنظيف النص من الرموز الغريبة اللي بتخرب الـ API
+    clean_text = "".join(char for char in extracted_text if ord(char) < 65535)[:3000]
 
     st.success(f"Loaded: {uploaded_file.name}")
 
-    # 4. Action Buttons
+    # 3. Action Buttons
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        if st.button("📝 Summarize"):
+        if st.button("📝 Summarize & USMLE"):
             with st.spinner('Summarizing...'):
-                try:
-                    resp = client.chat.completions.create(
-                        messages=[{"role":"user","content":f"Summarize this medical text in Arabic (keep medical terms in English): {clean_text}"}],
-                        model="llama3-8b-8192"
-                    )
-                    st.markdown(resp.choices[0].message.content)
-                except:
-                    st.error("Text still contains invalid characters. Try another part.")
+                prompt = f"Analyze these medical slides. Extract high-yield USMLE info and PubMed links. Respond in English (medical) and Arabic (explanation): {clean_text}"
+                resp = client.chat.completions.create(messages=[{"role":"user","content":prompt}], model="llama3-8b-8192")
+                st.markdown(resp.choices[0].message.content)
 
     with col2:
-        if st.button("🧠 Flashcards"):
-            with st.spinner('Creating...'):
-                try:
-                    resp = client.chat.completions.create(
-                        messages=[{"role":"user","content":f"Create 3 USMLE flashcards from: {clean_text}"}],
-                        model="llama3-8b-8192"
-                    )
-                    st.info(resp.choices[0].message.content)
-                except:
-                    st.error("Flashcards failed.")
+        if st.button("🧠 Q&A Mode"):
+            with st.spinner('Creating Questions...'):
+                prompt = f"Based on these slides, create 5 important Questions and Answers for a medical exam: {clean_text}"
+                resp = client.chat.completions.create(messages=[{"role":"user","content":prompt}], model="llama3-8b-8192")
+                st.info(resp.choices[0].message.content)
 
     with col3:
-        if st.button("❓ Detailed Q&A"):
-            with st.spinner('Thinking...'):
-                try:
-                    resp = client.chat.completions.create(
-                        messages=[{"role":"user","content":f"Create a Q&A from this text: {clean_text}"}],
-                        model="llama3-8b-8192"
-                    )
-                    st.write(resp.choices[0].message.content)
-                except:
-                    st.error("Q&A failed.")
+        if st.button("🃏 Flashcards"):
+            with st.spinner('Creating Cards...'):
+                prompt = f"Create 3 active recall flashcards from: {clean_text}"
+                resp = client.chat.completions.create(messages=[{"role":"user","content":prompt}], model="llama3-8b-8192")
+                st.warning(resp.choices[0].message.content)
 
-    # 5. Direct Question (Chat)
+    # 4. Chat Interface
     st.divider()
-    user_q = st.text_input("💬 Ask about any medical concept (e.g. Porphyrias):")
+    user_q = st.text_input("💬 Ask about any slide content (e.g., Porphyria Cutanea Tarda):")
     if user_q:
-        with st.spinner('Searching Brain...'):
-            resp = client.chat.completions.create(
-                messages=[{"role":"user","content":f"Answer this medical question clearly: {user_q}"}],
-                model="llama3-8b-8192"
-            )
-            st.chat_message("assistant").write(resp.choices[0].message.content)
+        resp = client.chat.completions.create(
+            messages=[{"role":"user","content":f"Based on: {clean_text}, answer: {user_q}"}],
+            model="llama3-8b-8192"
+        )
+        st.chat_message("assistant").write(resp.choices[0].message.content)
