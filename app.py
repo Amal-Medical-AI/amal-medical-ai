@@ -1,79 +1,58 @@
 import streamlit as st
 from groq import Groq
-import fitz  # PyMuPDF
+import PyPDF2
 import re
 
-# 1. Page Config & Styling
+# 1. Styling
 st.set_page_config(page_title="Amal's Medical Brain", layout="wide")
-st.markdown("""
-    <style>
-    .main { background-color: #fff0f5; }
-    .stButton>button { width: 100%; border-radius: 20px; background-color: #ff69b4; color: white; font-weight: bold; border: none; height: 3em; }
-    h1, h2, h3 { color: #ff69b4; text-align: center; }
-    </style>
-    """, unsafe_allow_html=True)
+st.markdown("<style>.main { background-color: #fff0f5; } .stButton>button { background-color: #ff69b4; color: white; border-radius: 20px; font-weight: bold; height: 3em; }</style>", unsafe_allow_html=True)
 
-# 2. Setup
+# 2. API Setup
 client = Groq(api_key=st.secrets["GROQ_API_KEY"])
-
-if "medical_history" not in st.session_state:
-    st.session_state.medical_history = []
 
 st.title("🌸 Amal's Medical Brain 🌸")
 
-# 3. File Uploader
 uploaded_file = st.file_uploader("Upload Lecture (PDF)", type=["pdf"])
 
 if uploaded_file:
-    full_text = ""
+    # قراءة النص بأبسط وأخف طريقة ممكنة لمنع الـ Connection Error
+    text = ""
     try:
-        with fitz.open(stream=uploaded_file.read(), filetype="pdf") as doc:
-            for page in doc:
-                full_text += page.get_text()
+        reader = PyPDF2.PdfReader(uploaded_file)
+        for page in reader.pages[:4]: # نكتفي بأول 4 صفحات لضمان السرعة
+            text += page.extract_text() + " "
         st.success(f"✅ Loaded: {uploaded_file.name}")
     except:
-        st.error("Error reading file. I will use general knowledge to help you.")
+        st.error("Error reading PDF. Use the Chat below.")
 
-    # تنظيف النص لإرساله للذكاء الاصطناعي
-    clean_text = re.sub(r'[^a-zA-Z0-9\s\u0590-\u05FF]', '', full_text)[:3000]
+    # تنظيف النص من "الألغام" البرمجية
+    clean_text = re.sub(r'[^a-zA-Z0-9\s\u0590-\u05FF]', '', text)[:3000]
 
-    # 4. الأزرار - كل زر له مهمة منفصلة
-    col1, col2, col3 = st.columns(3)
+    # 3. الميزات الثلاث (الأزرار)
+    col1, col2 = st.columns(2)
     
     with col1:
-        if st.button("📝 Summary & USMLE"):
+        if st.button("📝 Summarize & USMLE"):
             with st.spinner('Summarizing...'):
                 prompt = f"Summarize this and link to USMLE High-yield: {clean_text}"
                 resp = client.chat.completions.create(messages=[{"role":"user","content":prompt}], model="llama3-70b-8192")
                 st.markdown(resp.choices[0].message.content)
 
     with col2:
-        if st.button("🧠 Flashcards (Active Recall)"):
+        if st.button("🧠 Flashcards"):
             with st.spinner('Creating Cards...'):
-                prompt = f"Create 5 medical flashcards (Q&A) from: {clean_text}"
+                prompt = f"Create 5 medical flashcards from: {clean_text}"
                 resp = client.chat.completions.create(messages=[{"role":"user","content":prompt}], model="llama3-70b-8192")
                 st.info(resp.choices[0].message.content)
 
-    with col3:
-        if st.button("🔍 PubMed & Research"):
-            with st.spinner('Searching Research...'):
-                prompt = f"Find 3 PubMed research topics (2024-2026) related to this material: {clean_text}"
-                resp = client.chat.completions.create(messages=[{"role":"user","content":prompt}], model="llama3-70b-8192")
-                st.warning(resp.choices[0].message.content)
-
-    # 5. مربع الدردشة (للأسئلة المباشرة)
+    # 4. الدردشة المباشرة (المنقذ الدائم)
     st.divider()
-    st.subheader("💬 Chat with your Lecture")
-    user_q = st.text_input("Ask a specific question (e.g., Explain the Porphyrias):")
+    st.subheader("💬 Ask anything (Best for complex slides)")
+    user_q = st.text_input("Example: Explain the steps of Heme Synthesis")
     if user_q:
-        with st.spinner('Thinking...'):
+        with st.spinner('Answering...'):
             resp = client.chat.completions.create(
                 messages=[{"role":"user","content":f"Context: {clean_text}\nQuestion: {user_q}"}],
                 model="llama3-70b-8192"
             )
             st.chat_message("assistant").write(resp.choices[0].message.content)
-
-# 6. تذكير المراجعة (الذاكرة)
-if uploaded_file:
-    st.sidebar.success(f"Archived: {uploaded_file.name}")
-    st.sidebar.write("💡 Reminder: Review the rate-limiting enzyme from this lecture today!")
