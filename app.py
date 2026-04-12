@@ -3,17 +3,19 @@ from groq import Groq
 import PyPDF2
 import re
 
-# 1. Professional Medical Theme
+# 1. إعدادات الصفحة والستايل الطبي
 st.set_page_config(page_title="Amal's Medical Brain", layout="wide")
 st.markdown("""
     <style>
     .main { background-color: #fff0f5; }
     .stButton>button { width: 100%; border-radius: 20px; background-color: #ff69b4; color: white; font-weight: bold; height: 3em; border: none; }
-    h1, h3 { color: #ff69b4; text-align: center; }
+    h1, h3 { color: #ff69b4; text-align: center; font-family: 'Arial'; }
+    .stTextInput>div>div>input { border-radius: 15px; }
     </style>
     """, unsafe_allow_html=True)
 
-# 2. Setup
+# 2. إعداد الـ API والذاكرة
+# تأكدي من وجود GROQ_API_KEY في ملف الـ secrets
 client = Groq(api_key=st.secrets["GROQ_API_KEY"])
 
 if "lecture_memory" not in st.session_state:
@@ -21,75 +23,90 @@ if "lecture_memory" not in st.session_state:
 
 st.title("🌸 Amal's Medical Brain 🌸")
 
-# 4. File Uploader
-uploaded_file = st.file_uploader("Upload Medical Lecture", type=["pdf"])
+# 3. القائمة الجانبية (Sidebar)
+st.sidebar.title("🧠 Study Memory")
+if st.session_state.lecture_memory:
+    for item in st.session_state.lecture_memory:
+        st.sidebar.write(f"📖 {item['name']}")
+else:
+    st.sidebar.write("No history yet. Upload a lecture!")
+
+# 4. معالج الملفات الذكي
+uploaded_file = st.file_uploader("Upload Medical Lecture (PDF)", type=["pdf"])
 
 if uploaded_file:
     raw_text = ""
+    # شريط تقدم لرفع "الغموض" عن المستخدم
+    progress_bar = st.progress(0)
+    
     try:
         reader = PyPDF2.PdfReader(uploaded_file)
-        # نأخذ أول 5 صفحات فقط لتجنب تجاوز حد الـ Tokens
-        num_pages = min(len(reader.pages), 5)
-        for i in range(num_pages):
-            raw_text += reader.pages[i].extract_text() + " "
+        # نأخذ أول 6 صفحات لضمان عدم تجاوز حد الكلمات المسموح
+        pages_to_read = min(len(reader.pages), 6)
         
-        # تنظيف النص: إزالة المسافات الزائدة والرموز الغريبة التي تزعج الـ API
+        for i in range(pages_to_read):
+            page_text = reader.pages[i].extract_text()
+            if page_text:
+                raw_text += page_text + " "
+            progress_bar.progress((i + 1) / pages_to_read)
+        
+        # تنظيف النص: إزالة المسافات والرموز التي تعيق الـ AI
         clean_text = re.sub(r'\s+', ' ', raw_text).strip()
-        # تقليص النص لـ 4000 حرف كحد أقصى لضمان استقرار Groq
-        clean_text = clean_text[:4000]
+        clean_text = clean_text[:5000] # تحديد الحجم لضمان الاستقرار
 
         if uploaded_file.name not in [d['name'] for d in st.session_state.lecture_memory]:
             st.session_state.lecture_memory.append({"name": uploaded_file.name, "summary": clean_text[:500]})
         
-        st.success(f"File '{uploaded_file.name}' is ready!")
+        st.success(f"✅ Lecture '{uploaded_file.name}' loaded successfully!")
 
+        # 5. دالة النداء الآمن للـ AI (باستخدام الموديل الجديد)
+        def ask_medical_ai(prompt_text):
+            try:
+                # الموديل الجديد llama-3.3-70b-versatile بدلاً من القديم
+                completion = client.chat.completions.create(
+                    messages=[
+                        {"role": "system", "content": "You are a professional medical assistant for USMLE prep."},
+                        {"role": "user", "content": prompt_text}
+                    ],
+                    model="llama-3.3-70b-versatile",
+                    temperature=0.5,
+                    max_tokens=1500
+                )
+                return completion.choices[0].message.content
+            except Exception as e:
+                return f"⚠️ API Error: {str(e)}"
+
+        # 6. الأزرار التفاعلية
         col1, col2, col3 = st.columns(3)
         
-        # دالة مساعدة لإرسال الطلبات وتجنب الـ BadRequestError
-        def safe_groq_call(prompt):
-            try:
-                response = client.chat.completions.create(
-                    messages=[{"role": "user", "content": prompt}],
-                    model="llama3-70b-8192",
-                    max_tokens=1000 # تحديد عدد توكنز الرد
-                )
-                return response.choices[0].message.content
-            except Exception as e:
-                return f"⚠️ Error: The file might be too complex or the API is busy. (Details: {str(e)})"
-
         with col1:
             if st.button("📝 Summarize & Connect"):
-                with st.spinner('Summarizing...'):
+                with st.spinner('Thinking...'):
                     past = ", ".join([d['name'] for d in st.session_state.lecture_memory[:-1]])
-                    p = f"Summarize this medical text and relate it to {past if past else 'general medicine'}: {clean_text}"
-                    st.markdown(safe_groq_call(p))
+                    prompt = f"Summarize this medical text and connect it to previous topics ({past}): {clean_text}"
+                    st.markdown(ask_medical_ai(prompt))
 
         with col2:
             if st.button("❓ Active Recall Mode"):
-                with st.spinner('Generating Q&A...'):
-                    p = f"Create 3 USMLE style questions from this: {clean_text}"
-                    st.info(safe_groq_call(p))
+                with st.spinner('Generating Questions...'):
+                    prompt = f"Create 4 high-yield USMLE questions based on: {clean_text}"
+                    st.info(ask_medical_ai(prompt))
 
         with col3:
             if st.button("🧠 Flashcards"):
                 with st.spinner('Creating Cards...'):
-                    p = f"Create 5 high-yield flashcards from: {clean_text}"
-                    st.warning(safe_groq_call(p))
+                    prompt = f"Create 5 active recall flashcards for: {clean_text}"
+                    st.warning(ask_medical_ai(prompt))
+
+        # 7. نظام الدردشة المباشرة
+        st.divider()
+        st.subheader("💬 Ask about this lecture")
+        user_q = st.text_input("Type your medical question here...")
+        if user_q:
+            with st.spinner('Searching brain...'):
+                full_prompt = f"Context: {clean_text[:2500]}\nQuestion: {user_q}"
+                answer = ask_medical_ai(full_prompt)
+                st.chat_message("assistant").write(answer)
 
     except Exception as e:
-        st.error(f"Failed to process PDF: {e}")
-
-# 6. Chat Interface
-st.divider()
-user_q = st.text_input("💬 Ask a specific question:")
-if user_q and uploaded_file:
-    with st.spinner('Thinking...'):
-        prompt = f"Context: {clean_text[:2000]}\nQuestion: {user_q}"
-        try:
-            resp = client.chat.completions.create(
-                messages=[{"role": "user", "content": prompt}],
-                model="llama3-70b-8192"
-            )
-            st.chat_message("assistant").write(resp.choices[0].message.content)
-        except:
-            st.error("Could not process this question. Try a shorter one.")
+        st.error(f"Error processing file: {e}")
