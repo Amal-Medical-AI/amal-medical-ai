@@ -1,3 +1,5 @@
 streamlit
 groq
-pymupdf
+PyPDF2
+python-docx
+python-pptx
